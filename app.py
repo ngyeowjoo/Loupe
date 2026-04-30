@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import datetime
 
 st.set_page_config(
-    page_title="Loupe",
+    page_title="PPTX Brand Checker",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -256,8 +256,21 @@ def check_slide(xml, slide_num, cfg):
         bullet_paras = [p for p in paras if "<a:buChar" in p or "<a:buAutoNum" in p]
         total_bullets += len(bullet_paras)
 
-        # Collect all srgbClr in this shape for color context
-        shape_colors = re.findall(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', sp)
+        # Extract fill colors specifically from shape properties (spPr solidFill)
+        # This catches filled boxes, backgrounds, borders — not text run colors
+        spPr_match = re.search(r'<p:spPr>([\s\S]*?)</p:spPr>', sp)
+        fill_colors = []
+        if spPr_match:
+            spPr = spPr_match.group(1)
+            # solidFill inside spPr
+            for fc in re.finditer(r'<a:solidFill>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', spPr):
+                fill_colors.append("#" + fc.group(1).upper())
+            # gradient fill stops
+            for fc in re.finditer(r'<a:gs[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', spPr):
+                fill_colors.append("#" + fc.group(1).upper())
+            # line/outline fill
+            for fc in re.finditer(r'<a:ln>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', spPr):
+                fill_colors.append("#" + fc.group(1).upper())
 
         # Track checked combos to avoid duplicate issues per shape
         checked_font_issues = set()
@@ -327,14 +340,25 @@ def check_slide(xml, slide_num, cfg):
                                 "colors":  [],
                             })
 
-        # Collect shape-level fill/outline colors
-        for fc in shape_colors:
-            all_colors_with_ctx.append(("#" + fc.upper(), shape_text))
+        # Add fill colors with context label
+        label = f'fill box: "{shape_text}"' if shape_text else 'filled shape'
+        for fc in fill_colors:
+            all_colors_with_ctx.append((fc, label))
 
     # Background color
-    bg = re.search(r"<p:bg>[\s\S]*?<a:srgbClr val=\"([0-9A-Fa-f]{6})\"", xml)
+    bg = re.search(r'<p:bg>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', xml)
     if bg:
         all_colors_with_ctx.append(("#" + bg.group(1).upper(), "slide background"))
+
+    # Connector / line shapes (p:cxnSp) fill and line colors
+    for cxn in re.finditer(r'<p:cxnSp>([\s\S]*?)</p:cxnSp>', xml):
+        for fc in re.finditer(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', cxn.group(1)):
+            all_colors_with_ctx.append(("#" + fc.group(1).upper(), "connector / line shape"))
+
+    # Picture fills (p:pic blipFill tint/effect colors)
+    for pic in re.finditer(r'<p:pic>([\s\S]*?)</p:pic>', xml):
+        for fc in re.finditer(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', pic.group(1)):
+            all_colors_with_ctx.append(("#" + fc.group(1).upper(), "picture / image element"))
 
     # ── Whole-slide checks ──────────────────────────────────────────────────
     if cfg["chk_empty"] and not has_content:
@@ -571,9 +595,15 @@ with st.sidebar:
     for rk, rd in ROLE_DEFAULTS.items():
         with st.expander(f"{ROLE_LABELS[rk]}  —  default {rd['size']}pt"):
             c1, c2 = st.columns(2)
-            font = c1.text_input("Font", rd["font"], key=f"f_{rk}")
+            # Font is fixed — display only, not editable
+            c1.markdown(
+                f"<div style='font-size:12px;color:#6b7280;margin-bottom:2px'>Font</div>"
+                f"<div style='background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;"
+                f"padding:7px 10px;font-size:13px;color:#374151'>{rd['font']}</div>",
+                unsafe_allow_html=True
+            )
             size = c2.number_input("pt",  6, 96, rd["size"], key=f"s_{rk}")
-            role_specs[rk] = {"font": font, "size": size}
+            role_specs[rk] = {"font": rd["font"], "size": size}
 
     st.divider()
     st.markdown("### 🎨 Brand colors")
@@ -639,12 +669,11 @@ st.markdown("""
 <div style="display:flex;align-items:center;gap:18px;margin-bottom:6px">
   <div style="font-size:64px;line-height:1">🔍</div>
   <div>
-    <div style="font-size:28px;font-weight:700;color:#92400e;line-height:1.2">Loupe - A PowerPoint Brand Checker</div>
+    <div style="font-size:28px;font-weight:700;color:#92400e;line-height:1.2">PowerPoint Brand Checker</div>
     <div style="font-size:13px;color:#b45309;font-style:italic;margin-top:4px">Powered by JoAI</div>
-     <div style="font-size:13px;color:#b45309;font-style:italic;margin-top:4px">AI may contain errors; verify important information</div>
   </div>
 </div>
-<p style="color:#6b7280;font-size:14px;margin-top:10">Upload a .pptx — verify fonts, colors, text roles, and layout against your brand guidelines.</p>
+<p style="color:#6b7280;font-size:14px;margin-top:0">Upload a .pptx — verify fonts, colors, text roles, and layout against your brand guidelines.</p>
 """, unsafe_allow_html=True)
 
 uploaded = st.file_uploader("Drop your .pptx file here", type=["pptx"])

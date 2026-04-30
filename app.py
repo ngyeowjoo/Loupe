@@ -641,9 +641,10 @@ st.markdown("""
   <div>
     <div style="font-size:28px;font-weight:700;color:#92400e;line-height:1.2">PowerPoint Brand Checker</div>
     <div style="font-size:13px;color:#b45309;font-style:italic;margin-top:4px">Powered by JoAI</div>
+     <div style="font-size:13px;color:#b45309;font-style:italic;margin-top:4px">This content was generated using AI and may contain errors; verify important information</div>
   </div>
 </div>
-<p style="color:#6b7280;font-size:14px;margin-top:0">Upload a .pptx — verify fonts, colors, text roles, and layout against your brand guidelines.</p>
+<p style="color:#6b7280;font-size:14px;margin-top:5">Upload a .pptx — verify fonts, colors, text roles, and layout against your brand guidelines.</p>
 """, unsafe_allow_html=True)
 
 uploaded = st.file_uploader("Drop your .pptx file here", type=["pptx"])

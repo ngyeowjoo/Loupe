@@ -46,22 +46,17 @@ h2, h3 { color: #78350f !important; }
 }
 .stButton > button {
     background-color: var(--orange) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
+    color: white !important; border: none !important;
+    border-radius: 8px !important; font-weight: 600 !important;
 }
 .stButton > button:hover { background-color: #C55A11 !important; }
 .stDownloadButton > button {
     background-color: var(--amber-800) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
+    color: white !important; border: none !important; border-radius: 8px !important;
 }
 [data-testid="stFileUploadDropzone"] {
     background-color: var(--amber-50) !important;
-    border: 2px dashed var(--amber-400) !important;
-    border-radius: 10px !important;
+    border: 2px dashed var(--amber-400) !important; border-radius: 10px !important;
 }
 .stProgress > div > div { background-color: var(--orange) !important; }
 .stTabs [data-baseweb="tab-list"] { border-bottom: 2px solid var(--amber-200); }
@@ -70,6 +65,8 @@ h2, h3 { color: #78350f !important; }
     border-bottom: 2px solid var(--orange) !important;
 }
 hr { border-color: var(--amber-200) !important; }
+
+/* Swatches */
 .swatch-row { display:flex; gap:8px; flex-wrap:wrap; margin:6px 0; }
 .swatch {
     display:inline-flex; align-items:center; gap:6px;
@@ -77,22 +74,59 @@ hr { border-color: var(--amber-200) !important; }
     border-radius:20px; padding:3px 10px; font-size:12px;
 }
 .swatch-dot { width:14px; height:14px; border-radius:50%; border:1px solid #ccc; flex-shrink:0; }
+
+/* Role table */
 .role-table { width:100%; border-collapse:collapse; font-size:13px; }
 .role-table th {
     background:var(--amber-100); padding:6px 10px; text-align:left;
     border-bottom:2px solid var(--amber-200); color:#78350f;
 }
-.role-table td { padding:6px 10px; border-bottom:1px solid var(--amber-100); }
+.role-table td { padding:6px 10px; border-bottom:1px solid var(--amber-100); vertical-align:top; }
 .role-table tr:hover td { background:var(--amber-50); }
-.badge { display:inline-block; border-radius:4px; padding:2px 8px; font-size:11px; font-weight:600; }
+
+/* Role badges */
+.badge { display:inline-block; border-radius:4px; padding:2px 8px; font-size:11px; font-weight:600; white-space:nowrap; }
 .badge-title     { background:#fde68a; color:#78350f; }
 .badge-header    { background:#fed7aa; color:#9a3412; }
 .badge-subheader { background:#fef3c7; color:#92400e; }
 .badge-body      { background:#f3f4f6; color:#374151; }
+
+/* Issue cards */
+.issue-card {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 6px 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.issue-card.err  { background:#fef2f2; border-left:4px solid #ef4444; }
+.issue-card.warn { background:#fffbeb; border-left:4px solid #f59e0b; }
+.issue-card .issue-title { font-weight:600; margin-bottom:4px; }
+.issue-card .issue-title.err  { color:#991b1b; }
+.issue-card .issue-title.warn { color:#78350f; }
+.snippet {
+    display:inline-block;
+    background:#1e1e1e; color:#d4d4d4;
+    font-family:monospace; font-size:11px;
+    border-radius:4px; padding:2px 8px;
+    margin-top:4px; max-width:100%;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.color-chip-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+.color-chip {
+    display:inline-flex; align-items:center; gap:5px;
+    background:#fff; border:1px solid #e5e7eb;
+    border-radius:20px; padding:2px 8px; font-size:11px;
+    font-family:monospace;
+}
+.chip-dot { width:12px; height:12px; border-radius:50%; border:1px solid #ccc; flex-shrink:0; }
+.detail-meta {
+    font-size:11px; color:#6b7280; margin-top:3px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ── Brand palette defaults: Office Orange Accent 1 family ─────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 ORANGE_PALETTE = {
     "#ED7D31": "Orange, Accent 1",
     "#FBE5D6": "Lighter 80%",
@@ -103,7 +137,6 @@ ORANGE_PALETTE = {
 }
 DEFAULT_BRAND_COLORS = list(ORANGE_PALETTE.keys())
 
-# ── Text role defaults ────────────────────────────────────────────────────────
 ROLE_DEFAULTS = {
     "slide_title": {"font": "Plus Jakarta Sans", "weight": "Medium", "size": 40},
     "header":      {"font": "Plus Jakarta Sans", "weight": "Normal", "size": 16},
@@ -117,8 +150,18 @@ ROLE_LABELS = {
     "body":        "Body Text",
 }
 
+SNIPPET_MAX = 60  # characters before truncation
 
-# ── Color math ────────────────────────────────────────────────────────────────
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def trunc(text, n=SNIPPET_MAX):
+    text = " ".join(text.split())  # collapse whitespace
+    return text[:n] + "…" if len(text) > n else text
+
+def extract_text(xml_fragment):
+    """Pull plain text from an XML shape or run fragment."""
+    return re.sub(r"<[^>]+>", "", xml_fragment).strip()
+
 def hex_to_rgb(h):
     h = h.lstrip("#")
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
@@ -130,7 +173,7 @@ def rgb_to_lab(r, g, b):
     X = (R*0.4124 + G*0.3576 + B*0.1805)/0.95047
     Y = (R*0.2126 + G*0.7152 + B*0.0722)/1.00000
     Z = (R*0.0193 + G*0.1192 + B*0.9505)/1.08883
-    def f(t): return t**(1/3) if t > 0.008856 else 7.787*t + 16/116
+    def f(t): return t**(1/3) if t > 0.008856 else 7.787*t+16/116
     return 116*f(Y)-16, 500*(f(X)-f(Y)), 200*(f(Y)-f(Z))
 
 def delta_e(h1, h2):
@@ -141,27 +184,18 @@ def delta_e(h1, h2):
 def is_brand_color(hex_val, brand_colors, tolerance):
     return any(delta_e(hex_val, bc) <= tolerance for bc in brand_colors)
 
-
-# ── Role heuristic ────────────────────────────────────────────────────────────
 def infer_role(size_pt, is_title_ph, cfg):
-    """Return (role_key, method)."""
     if is_title_ph:
         return "slide_title", "explicit"
     if not cfg.get("smart_roles"):
         return "body", "explicit"
-
-    title_sz  = cfg["role_sizes"]["slide_title"]
-    header_sz = cfg["role_sizes"]["header"]
-    sub_sz    = cfg["role_sizes"]["subheader"]
-
-    if size_pt >= title_sz * 0.85:
-        return "slide_title", "heuristic"
-    elif size_pt >= header_sz * 0.85:
-        return "header", "heuristic"
-    elif size_pt >= sub_sz * 0.85:
-        return "subheader", "heuristic"
-    else:
-        return "body", "heuristic"
+    ts = cfg["role_sizes"]["slide_title"]
+    hs = cfg["role_sizes"]["header"]
+    ss = cfg["role_sizes"]["subheader"]
+    if size_pt >= ts * 0.85:   return "slide_title", "heuristic"
+    elif size_pt >= hs * 0.85: return "header",      "heuristic"
+    elif size_pt >= ss * 0.85: return "subheader",   "heuristic"
+    else:                       return "body",        "heuristic"
 
 
 # ── PPTX parser ───────────────────────────────────────────────────────────────
@@ -184,26 +218,44 @@ def parse_pptx(file_bytes):
     return slides_xml, pres_w, pres_h
 
 
+# ── Core checker ─────────────────────────────────────────────────────────────
 def check_slide(xml, slide_num, cfg):
+    """
+    Returns dict with:
+      issues: list of {type, message, snippet, detail, colors}
+      role_findings: list of {role, method, font, size, snippet}
+      sig: layout signature string
+    """
     issues = []
     role_findings = []
-    all_colors = []
+    all_colors_with_ctx = []   # list of (hex, snippet)
     has_content = False
     total_bullets = 0
-
     shapes = re.findall(r"<p:sp[\s\S]*?</p:sp>", xml)
 
     for sp in shapes:
         is_title_ph = bool(re.search(r'ph type="title"|ph type="ctrTitle"', sp))
-        text = re.sub(r"<[^>]+>", "", sp).strip()
-        if text:
+        shape_text  = trunc(extract_text(sp))
+
+        raw_text = extract_text(sp)
+        if raw_text:
             has_content = True
 
+        # Count bullets
         paras = re.findall(r"<a:p>([\s\S]*?)</a:p>", sp)
-        total_bullets += sum(1 for p in paras if "<a:buChar" in p or "<a:buAutoNum" in p)
+        bullet_paras = [p for p in paras if "<a:buChar" in p or "<a:buAutoNum" in p]
+        total_bullets += len(bullet_paras)
+
+        # Collect all srgbClr in this shape for color context
+        shape_colors = re.findall(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', sp)
+
+        # Track checked combos to avoid duplicate issues per shape
+        checked_font_issues = set()
+        checked_size_issues = set()
 
         for rpr_m in re.finditer(r"<a:rPr([^>]*)>([\s\S]*?)</a:rPr>", sp):
             attrs, inner = rpr_m.group(1), rpr_m.group(2)
+
             font_name = None
             lm = re.search(r'<a:latin typeface="([^"]+)"', inner)
             if lm and lm.group(1) not in ("+mj-lt", "+mn-lt"):
@@ -214,66 +266,109 @@ def check_slide(xml, slide_num, cfg):
             if sm:
                 size_pt = int(sm.group(1)) / 100
 
+            run_color = None
+            cm = re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', inner)
+            if cm:
+                run_color = "#" + cm.group(1).upper()
+                all_colors_with_ctx.append((run_color, shape_text))
+
             if size_pt or font_name:
                 role, method = infer_role(size_pt or 0, is_title_ph, cfg)
                 role_findings.append({
                     "role": role, "method": method,
                     "font": font_name, "size": size_pt,
+                    "snippet": shape_text,
                 })
 
-            cm = re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', inner)
-            if cm:
-                all_colors.append("#" + cm.group(1).upper())
+                spec     = cfg["role_specs"].get(role, {})
+                exp_font = spec.get("font", "").lower()
+                exp_size = spec.get("size")
 
-        for fm in re.finditer(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', sp):
-            all_colors.append("#" + fm.group(1).upper())
+                # Font check
+                if cfg["chk_fonts"] and font_name and exp_font:
+                    if exp_font not in font_name.lower():
+                        key = (role, font_name)
+                        if key not in checked_font_issues:
+                            checked_font_issues.add(key)
+                            issues.append({
+                                "type":    "error",
+                                "message": f"{ROLE_LABELS[role]}: wrong font",
+                                "detail":  f"Found '{font_name}', expected '{spec['font']}'",
+                                "snippet": shape_text,
+                                "colors":  [],
+                            })
 
+                # Size check
+                if cfg["chk_sizes"] and size_pt and exp_size:
+                    diff = abs(size_pt - exp_size)
+                    if diff > cfg.get("size_tolerance", 2):
+                        key = (role, size_pt)
+                        if key not in checked_size_issues:
+                            checked_size_issues.add(key)
+                            sev = "error" if diff > 4 else "warning"
+                            issues.append({
+                                "type":    sev,
+                                "message": f"{ROLE_LABELS[role]}: wrong font size",
+                                "detail":  f"Found {size_pt}pt, expected {exp_size}pt",
+                                "snippet": shape_text,
+                                "colors":  [],
+                            })
+
+        # Collect shape-level fill/outline colors
+        for fc in shape_colors:
+            all_colors_with_ctx.append(("#" + fc.upper(), shape_text))
+
+    # Background color
     bg = re.search(r"<p:bg>[\s\S]*?<a:srgbClr val=\"([0-9A-Fa-f]{6})\"", xml)
     if bg:
-        all_colors.append("#" + bg.group(1).upper())
+        all_colors_with_ctx.append(("#" + bg.group(1).upper(), "slide background"))
 
-    # — Checks —
+    # ── Whole-slide checks ──────────────────────────────────────────────────
     if cfg["chk_empty"] and not has_content:
-        issues.append(("error", "Empty slide — no text content found", "slide"))
+        issues.append({
+            "type":    "error",
+            "message": "Empty slide — no text content",
+            "detail":  "This slide contains no readable text in any shape.",
+            "snippet": "",
+            "colors":  [],
+        })
 
-    checked = set()
-    for rf in role_findings:
-        role = rf["role"]
-        spec = cfg["role_specs"].get(role, {})
-        exp_font = spec.get("font", "").lower()
-        exp_size = spec.get("size")
-
-        if cfg["chk_fonts"] and rf["font"] and exp_font:
-            if exp_font not in rf["font"].lower():
-                tag = f"{role}-font-{rf['font']}"
-                if tag not in checked:
-                    issues.append(("error",
-                        f"{ROLE_LABELS[role]}: font '{rf['font']}' ≠ expected '{spec['font']}'",
-                        role))
-                    checked.add(tag)
-
-        if cfg["chk_sizes"] and rf["size"] and exp_size:
-            diff = abs(rf["size"] - exp_size)
-            if diff > cfg.get("size_tolerance", 2):
-                tag = f"{role}-sz-{rf['size']}"
-                if tag not in checked:
-                    sev = "error" if diff > 4 else "warning"
-                    issues.append((sev,
-                        f"{ROLE_LABELS[role]}: {rf['size']}pt ≠ expected {exp_size}pt",
-                        role))
-                    checked.add(tag)
-
+    # Color check — group off-brand colors with their context snippets
     if cfg["chk_colors"] and cfg["brand_colors"]:
-        unique = list(set(all_colors))
-        off = [c for c in unique if not is_brand_color(c, cfg["brand_colors"], cfg["tolerance"])]
-        if off:
-            issues.append(("warning",
-                f"Off-brand colors: {', '.join(off[:4])}{'…' if len(off)>4 else ''}",
-                "color"))
+        off_brand = {}  # hex -> list of snippets
+        for color_hex, ctx in all_colors_with_ctx:
+            if not is_brand_color(color_hex, cfg["brand_colors"], cfg["tolerance"]):
+                off_brand.setdefault(color_hex, [])
+                if ctx not in off_brand[color_hex]:
+                    off_brand[color_hex].append(ctx)
+        if off_brand:
+            # one issue per off-brand color, showing where it appears
+            for color_hex, contexts in list(off_brand.items())[:6]:
+                ctx_str = " / ".join(c for c in contexts[:2] if c)
+                issues.append({
+                    "type":    "warning",
+                    "message": "Off-brand color used",
+                    "detail":  f"In: {ctx_str}" if ctx_str else "Found in slide elements",
+                    "snippet": ctx_str,
+                    "colors":  [color_hex],
+                })
 
+    # Bullet check — show first bullet text as snippet
     if cfg["chk_bullets"] and total_bullets > 7:
-        issues.append(("warning",
-            f"{total_bullets} bullet points — consider visual alternatives", "layout"))
+        # find first shape with bullets to get snippet
+        bullet_snippet = ""
+        for sp in shapes:
+            paras = re.findall(r"<a:p>([\s\S]*?)</a:p>", sp)
+            if any("<a:buChar" in p or "<a:buAutoNum" in p for p in paras):
+                bullet_snippet = trunc(extract_text(sp))
+                break
+        issues.append({
+            "type":    "warning",
+            "message": f"Excessive bullet points ({total_bullets} total)",
+            "detail":  "Consider replacing some bullets with visuals or concise prose.",
+            "snippet": bullet_snippet,
+            "colors":  [],
+        })
 
     sig = f"{len(shapes)}-{sorted([rf['size'] for rf in role_findings if rf['size']])}"
     return {"num": slide_num, "issues": issues, "role_findings": role_findings, "sig": sig}
@@ -292,30 +387,69 @@ def run_checks(slides_xml, pres_w, pres_h, cfg):
         if count > len(slides_xml) * 0.4:
             for r in results:
                 if r["sig"] != most_common:
-                    r["issues"].append(("warning", "Layout differs from majority of slides", "layout"))
+                    r["issues"].append({
+                        "type":    "warning",
+                        "message": "Layout differs from majority of slides",
+                        "detail":  "This slide's structure (number of shapes / sizes) is unusual.",
+                        "snippet": "",
+                        "colors":  [],
+                    })
 
     if cfg["slide_size"] != "any":
         exp_w = 12192000 if cfg["slide_size"] == "widescreen" else 9144000
-        if abs(pres_w-exp_w) > 50000 or abs(pres_h-6858000) > 50000:
-            results[0]["issues"].insert(0, ("warning",
-                f"Deck size ({pres_w/914400:.2f}×{pres_h/914400:.2f} in) ≠ expected {cfg['slide_size']}",
-                "slide"))
+        if abs(pres_w - exp_w) > 50000 or abs(pres_h - 6858000) > 50000:
+            results[0]["issues"].insert(0, {
+                "type":    "warning",
+                "message": "Unexpected slide dimensions",
+                "detail":  f"Deck is {pres_w/914400:.2f}×{pres_h/914400:.2f} in, expected {cfg['slide_size']}.",
+                "snippet": "",
+                "colors":  [],
+            })
     bar.empty()
     return results
 
 
+# ── Issue card renderer ───────────────────────────────────────────────────────
+def render_issue_card(issue):
+    t     = issue["type"]
+    cls   = "err" if t == "error" else "warn"
+    icon  = "✖" if t == "error" else "⚠"
+    snip  = issue.get("snippet", "")
+    detail = issue.get("detail", "")
+    colors = issue.get("colors", [])
+
+    snippet_html = ""
+    if snip:
+        escaped = snip.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+        snippet_html = f'<div class="snippet">"{escaped}"</div>'
+
+    color_html = ""
+    if colors:
+        chips = "".join(
+            f'<div class="color-chip">'
+            f'<div class="chip-dot" style="background:{c}"></div>{c}'
+            f'</div>'
+            for c in colors
+        )
+        color_html = f'<div class="color-chip-row">{chips}</div>'
+
+    detail_html = f'<div class="detail-meta">{detail}</div>' if detail else ""
+
+    return f"""
+    <div class="issue-card {cls}">
+      <div class="issue-title {cls}">{icon} {issue['message']}</div>
+      {detail_html}
+      {snippet_html}
+      {color_html}
+    </div>"""
+
+
+# ── HTML report ───────────────────────────────────────────────────────────────
 def build_html_report(results, filename, score, cfg):
     score_color = "#065f46" if score >= 80 else "#92400e" if score >= 60 else "#9b1c1c"
-    rows = ""
-    for r in results:
-        rows += f"<tr><td style='font-weight:600'>Slide {r['num']}</td>"
-        if r["issues"]:
-            rows += "<td>" + "<br>".join(
-                f"<span style='color:{'#9b1c1c' if t=='error' else '#92400e'}'>{'✖' if t=='error' else '⚠'} {m}</span>"
-                for t,m,_ in r["issues"]
-            ) + "</td></tr>"
-        else:
-            rows += "<td><span style='color:#065f46'>✔ Pass</span></td></tr>"
+    total  = len(results)
+    errs   = sum(1 for r in results for i in r["issues"] if i["type"]=="error")
+    warns  = sum(1 for r in results for i in r["issues"] if i["type"]=="warning")
 
     swatches = "".join(
         f"<span style='display:inline-flex;align-items:center;gap:5px;"
@@ -326,9 +460,54 @@ def build_html_report(results, filename, score, cfg):
         f"{ORANGE_PALETTE.get(h,h)}</span>"
         for h in cfg["brand_colors"]
     )
-    total = len(results)
-    errs = sum(1 for r in results for t,_,__ in r["issues"] if t=="error")
-    warns = sum(1 for r in results for t,_,__ in r["issues"] if t=="warning")
+
+    slide_rows = ""
+    for r in results:
+        if not r["issues"]:
+            slide_rows += f"""
+            <div class='slide-block pass'>
+              <div class='slide-num'>✔ Slide {r['num']}</div>
+              <div class='pass-label'>No issues</div>
+            </div>"""
+        else:
+            issue_html = ""
+            for iss in r["issues"]:
+                t   = iss["type"]
+                cls = "err" if t=="error" else "warn"
+                icon= "✖" if t=="error" else "⚠"
+                snip = iss.get("snippet","")
+                det  = iss.get("detail","")
+                cols = iss.get("colors",[])
+                snip_html = (
+                    f"<div style='font-family:monospace;font-size:11px;"
+                    f"background:#1e1e1e;color:#d4d4d4;border-radius:4px;"
+                    f"padding:2px 8px;display:inline-block;margin-top:4px;"
+                    f"max-width:100%;overflow:hidden;text-overflow:ellipsis;"
+                    f"white-space:nowrap'>\"{snip}\"</div>"
+                    if snip else ""
+                )
+                chip_html = "".join(
+                    f"<span style='display:inline-flex;align-items:center;gap:4px;"
+                    f"background:#fff;border:1px solid #e5e7eb;border-radius:20px;"
+                    f"padding:2px 7px;font-size:11px;font-family:monospace;margin:2px'>"
+                    f"<span style='width:10px;height:10px;border-radius:50%;"
+                    f"background:{c};border:1px solid #ccc'></span>{c}</span>"
+                    for c in cols
+                )
+                issue_html += f"""
+                <div style='border-left:4px solid {"#ef4444" if cls=="err" else "#f59e0b"};
+                     background:{"#fef2f2" if cls=="err" else "#fffbeb"};
+                     border-radius:6px;padding:8px 12px;margin:5px 0;font-size:13px'>
+                  <strong style='color:{"#991b1b" if cls=="err" else "#78350f"}'>{icon} {iss["message"]}</strong>
+                  {"<div style='color:#6b7280;font-size:11px;margin-top:2px'>"+det+"</div>" if det else ""}
+                  {snip_html}
+                  {"<div style='margin-top:4px'>"+chip_html+"</div>" if chip_html else ""}
+                </div>"""
+            slide_rows += f"""
+            <div class='slide-block'>
+              <div class='slide-num'>Slide {r['num']}</div>
+              {issue_html}
+            </div>"""
 
     return f"""<!DOCTYPE html><html><head><meta charset='utf-8'>
 <title>Brand Report — {filename}</title>
@@ -342,11 +521,12 @@ def build_html_report(results, filename, score, cfg):
   .metric{{background:#fef3c7;border-radius:10px;padding:14px;text-align:center}}
   .metric-val{{font-size:28px;font-weight:700}}
   .metric-lbl{{font-size:12px;color:#777;margin-top:4px}}
-  table{{width:100%;border-collapse:collapse;margin-top:24px}}
-  th{{background:#fef3c7;padding:8px 12px;text-align:left;
-      border-bottom:2px solid #fde68a;color:#92400e;font-size:13px}}
-  td{{padding:8px 12px;border-top:1px solid #fef3c7;font-size:13px;vertical-align:top}}
   .palette{{margin:16px 0}}
+  .slide-block{{background:white;border:1px solid #fde68a;border-radius:10px;
+                padding:14px 18px;margin:10px 0}}
+  .slide-block.pass{{border-color:#bbf7d0}}
+  .slide-num{{font-weight:700;font-size:14px;color:#92400e;margin-bottom:6px}}
+  .pass-label{{color:#065f46;font-size:13px}}
 </style></head><body>
 <h1>📊 Brand Compliance Report</h1>
 <h2>{filename} &nbsp;·&nbsp; {datetime.now().strftime('%Y-%m-%d %H:%M')}</h2>
@@ -358,8 +538,8 @@ def build_html_report(results, filename, score, cfg):
   <div class='metric'><div class='metric-val' style='color:#92400e'>{warns}</div><div class='metric-lbl'>warnings</div></div>
 </div>
 <div class='palette'><strong style='color:#92400e'>Brand palette:</strong><br>{swatches}</div>
-<table><thead><tr><th>Slide</th><th>Issues</th></tr></thead>
-<tbody>{rows}</tbody></table>
+<hr style='border-color:#fde68a;margin:20px 0'>
+{slide_rows}
 </body></html>"""
 
 
@@ -370,8 +550,8 @@ with st.sidebar:
     st.title("⚙️ Brand Guidelines")
 
     st.markdown("### 🔤 Text roles")
-    smart_roles = st.toggle("Smart role detection", value=True,
-        help="Infer Header/Subheader/Body by font size when no explicit XML placeholder type exists")
+    smart_roles    = st.toggle("Smart role detection", value=True,
+        help="Infer Header/Subheader/Body by font size when no explicit XML placeholder exists")
     size_tolerance = st.slider("Size tolerance (±pt)", 0, 6, 2)
 
     role_specs = {}
@@ -379,7 +559,7 @@ with st.sidebar:
         with st.expander(f"{ROLE_LABELS[rk]}  —  default {rd['size']}pt"):
             c1, c2 = st.columns(2)
             font = c1.text_input("Font", rd["font"], key=f"f_{rk}")
-            size = c2.number_input("pt", 6, 96, rd["size"], key=f"s_{rk}")
+            size = c2.number_input("pt",  6, 96, rd["size"], key=f"s_{rk}")
             role_specs[rk] = {"font": font, "size": size}
 
     st.divider()
@@ -389,18 +569,19 @@ with st.sidebar:
     if "brand_colors" not in st.session_state:
         st.session_state.brand_colors = DEFAULT_BRAND_COLORS.copy()
 
-    swatch_html = '<div class="swatch-row">' + "".join(
-        f'<div class="swatch">'
-        f'<div class="swatch-dot" style="background:{h}"></div>'
-        f'<span style="font-size:11px">{ORANGE_PALETTE.get(h,h)}</span></div>'
-        for h in st.session_state.brand_colors
-    ) + '</div>'
-    st.markdown(swatch_html, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="swatch-row">' +
+        "".join(
+            f'<div class="swatch"><div class="swatch-dot" style="background:{h}"></div>'
+            f'<span style="font-size:11px">{ORANGE_PALETTE.get(h,h)}</span></div>'
+            for h in st.session_state.brand_colors
+        ) + '</div>', unsafe_allow_html=True
+    )
 
     color_input = st.text_input("Add hex color", placeholder="#FF5733")
     if color_input:
         v = color_input.strip().upper()
-        if not v.startswith("#"): v = "#"+v
+        if not v.startswith("#"): v = "#" + v
         if re.match(r"^#[0-9A-F]{6}$", v) and v not in st.session_state.brand_colors:
             st.session_state.brand_colors.append(v)
             st.rerun()
@@ -428,14 +609,14 @@ with st.sidebar:
         format_func=lambda x: {
             "widescreen": "Widescreen (13.33×7.5 in)",
             "standard":   "Standard (10×7.5 in)",
-            "any":        "Any / skip check"
+            "any":        "Any / skip check",
         }[x])
-    chk_fonts   = st.checkbox("Font families",       True)
-    chk_colors  = st.checkbox("Colors",              True)
-    chk_sizes   = st.checkbox("Font sizes",          True)
-    chk_layout  = st.checkbox("Layout consistency",  True)
-    chk_empty   = st.checkbox("Empty slides",        True)
-    chk_bullets = st.checkbox("Excessive bullets",   True)
+    chk_fonts   = st.checkbox("Font families",      True)
+    chk_colors  = st.checkbox("Colors",             True)
+    chk_sizes   = st.checkbox("Font sizes",         True)
+    chk_layout  = st.checkbox("Layout consistency", True)
+    chk_empty   = st.checkbox("Empty slides",       True)
+    chk_bullets = st.checkbox("Excessive bullets",  True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -464,8 +645,8 @@ if uploaded:
     results = run_checks(slides_xml, pres_w, pres_h, cfg)
 
     total    = len(results)
-    errors   = sum(1 for r in results for t,_,__ in r["issues"] if t=="error")
-    warnings = sum(1 for r in results for t,_,__ in r["issues"] if t=="warning")
+    errors   = sum(1 for r in results for i in r["issues"] if i["type"]=="error")
+    warnings = sum(1 for r in results for i in r["issues"] if i["type"]=="warning")
     clean    = sum(1 for r in results if not r["issues"])
     score    = round(clean/total*100)
 
@@ -479,25 +660,29 @@ if uploaded:
 
     tab1, tab2 = st.tabs(["📋 Slide issues", "🔤 Role detection map"])
 
+    # ── Tab 1: Issues with snippets ──────────────────────────────────────────
     with tab1:
         for r in results:
-            errs  = [(t,m) for t,m,_ in r["issues"] if t=="error"]
-            warns = [(t,m) for t,m,_ in r["issues"] if t=="warning"]
+            errs  = [i for i in r["issues"] if i["type"]=="error"]
+            warns = [i for i in r["issues"] if i["type"]=="warning"]
+
             if not r["issues"]:
                 with st.expander(f"✅ Slide {r['num']} — Pass"):
                     st.success("No issues found.")
             else:
                 icon = "🔴" if errs else "🟡"
-                with st.expander(f"{icon} Slide {r['num']} — {len(errs)} error(s), {len(warns)} warning(s)"):
-                    for _,msg in errs:   st.error(msg)
-                    for _,msg in warns:  st.warning(msg)
+                label = f"{icon} Slide {r['num']} — {len(errs)} error(s), {len(warns)} warning(s)"
+                with st.expander(label):
+                    cards_html = "".join(render_issue_card(i) for i in r["issues"])
+                    st.markdown(cards_html, unsafe_allow_html=True)
 
+    # ── Tab 2: Role detection map ────────────────────────────────────────────
     with tab2:
         if smart_roles:
-            st.info("⚠️ **Smart role detection on** — Header / Subheader / Body roles are inferred "
-                    "by font size. Rows labelled *heuristic* may not always be accurate.")
+            st.info("⚠️ **Smart role detection on** — Header/Subheader/Body inferred by font size. "
+                    "Rows marked *heuristic* may not always be accurate.")
         else:
-            st.info("Smart role detection is **off** — only explicit title placeholders are tagged.")
+            st.info("Smart role detection **off** — only explicit title placeholders are tagged.")
 
         badge_html = {
             "slide_title": '<span class="badge badge-title">Slide Title</span>',
@@ -516,17 +701,25 @@ if uploaded:
                     key = (rf["role"], rf["font"], rf["size"])
                     if key in seen: continue
                     seen.add(key)
-                    badge  = badge_html.get(rf["role"], "")
-                    method = "✓ explicit" if rf["method"]=="explicit" else "~ heuristic"
+                    badge   = badge_html.get(rf["role"], "")
+                    method  = "✓ explicit" if rf["method"]=="explicit" else "~ heuristic"
+                    font_d  = rf["font"] or "—"
+                    size_d  = f"{rf['size']}pt" if rf["size"] else "—"
+                    snip_d  = rf.get("snippet","") or "—"
+                    esc_snip = snip_d.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
                     rows_html += (
-                        f"<tr><td>{badge}</td>"
-                        f"<td>{rf['font'] or '—'}</td>"
-                        f"<td>{rf['size']}pt" if rf['size'] else "<td>—" +
-                        f"</td><td style='color:#999;font-size:11px'>{method}</td></tr>"
+                        f"<tr>"
+                        f"<td>{badge}</td>"
+                        f"<td>{font_d}</td>"
+                        f"<td>{size_d}</td>"
+                        f"<td style='max-width:200px;overflow:hidden;text-overflow:ellipsis;"
+                        f"white-space:nowrap;color:#6b7280;font-size:11px'>{esc_snip}</td>"
+                        f"<td style='color:#9ca3af;font-size:11px'>{method}</td>"
+                        f"</tr>"
                     )
                 st.markdown(
                     f"<table class='role-table'><thead><tr>"
-                    f"<th>Role</th><th>Font</th><th>Size</th><th>Method</th>"
+                    f"<th>Role</th><th>Font</th><th>Size</th><th>Text snippet</th><th>Method</th>"
                     f"</tr></thead><tbody>{rows_html}</tbody></table>",
                     unsafe_allow_html=True
                 )
@@ -542,9 +735,11 @@ else:
     st.markdown("#### Default brand palette — Office Orange Accent 1")
     st.markdown(
         '<div class="swatch-row">' +
-        "".join(f'<div class="swatch"><div class="swatch-dot" style="background:{h}"></div>{name}</div>'
-                for h,name in ORANGE_PALETTE.items()) +
-        '</div>', unsafe_allow_html=True
+        "".join(
+            f'<div class="swatch"><div class="swatch-dot" style="background:{h}"></div>{name}</div>'
+            for h,name in ORANGE_PALETTE.items()
+        ) + '</div>',
+        unsafe_allow_html=True
     )
 
     st.markdown("#### Default text role specs")

@@ -134,6 +134,8 @@ ORANGE_PALETTE = {
     "#F4B183": "Lighter 40%",
     "#C55A11": "Darker 25%",
     "#843C0B": "Darker 50%",
+    "#303C41": "Dark Slate",
+    "#F5F5F6": "Light Grey",
 }
 DEFAULT_BRAND_COLORS = list(ORANGE_PALETTE.keys())
 

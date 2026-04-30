@@ -8,7 +8,7 @@ from datetime import datetime
 
 st.set_page_config(
     page_title="PPTX Brand Checker",
-    page_icon="📊",
+    page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -154,6 +154,14 @@ ROLE_LABELS = {
 
 SNIPPET_MAX = 60  # characters before truncation
 
+# All accepted variants of the brand font family (lowercase for matching)
+ACCEPTED_FONTS = {
+    "plus jakarta sans",
+    "plus jakarta sans medium",
+    "plus jakarta sans normal",
+    "plus jakarta sans light",
+}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def trunc(text, n=SNIPPET_MAX):
@@ -286,16 +294,19 @@ def check_slide(xml, slide_num, cfg):
                 exp_font = spec.get("font", "").lower()
                 exp_size = spec.get("size")
 
-                # Font check
-                if cfg["chk_fonts"] and font_name and exp_font:
-                    if exp_font not in font_name.lower():
+                # Font check — accept any variant in ACCEPTED_FONTS
+                if cfg["chk_fonts"] and font_name:
+                    fn_lower = font_name.lower()
+                    font_ok = any(fn_lower == af or fn_lower.startswith(af) for af in ACCEPTED_FONTS)
+                    if not font_ok:
                         key = (role, font_name)
                         if key not in checked_font_issues:
                             checked_font_issues.add(key)
+                            accepted_list = ", ".join(sorted(ACCEPTED_FONTS))
                             issues.append({
                                 "type":    "error",
                                 "message": f"{ROLE_LABELS[role]}: wrong font",
-                                "detail":  f"Found '{font_name}', expected '{spec['font']}'",
+                                "detail":  f"Found '{font_name}' — accepted: {accepted_list}",
                                 "snippet": shape_text,
                                 "colors":  [],
                             })
@@ -624,7 +635,8 @@ with st.sidebar:
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
-st.title("📊 PowerPoint Brand Checker")
+st.title("🔍 PowerPoint Brand Checker")
+st.markdown("<p style='margin-top:-12px;font-size:13px;color:#92400e;font-style:italic'>Powered by JoAI</p>", unsafe_allow_html=True)
 st.caption("Upload a .pptx — verify fonts, colors, text roles, and layout against your brand guidelines.")
 
 uploaded = st.file_uploader("Drop your .pptx file here", type=["pptx"])

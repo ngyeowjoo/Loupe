@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import datetime
 
 st.set_page_config(
-    page_title="Loupe",
+    page_title="PPTX Brand Checker",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -194,6 +194,76 @@ def delta_e(h1, h2):
 def is_brand_color(hex_val, brand_colors, tolerance):
     return any(delta_e(hex_val, bc) <= tolerance for bc in brand_colors)
 
+# ── Robust color extraction (handles schemeClr, srgbClr, prstClr) ────────────
+import colorsys as _colorsys
+
+PRESET_COLORS = {
+    "red":"#FF0000","green":"#008000","blue":"#0000FF","yellow":"#FFFF00",
+    "orange":"#FFA500","purple":"#800080","black":"#000000","white":"#FFFFFF",
+    "gray":"#808080","grey":"#808080","cyan":"#00FFFF","magenta":"#FF00FF",
+    "lime":"#00FF00","maroon":"#800000","navy":"#000080","olive":"#808000",
+    "teal":"#008080","silver":"#C0C0C0","aqua":"#00FFFF","fuchsia":"#FF00FF",
+    "darkRed":"#8B0000","darkBlue":"#00008B","darkGreen":"#006400",
+}
+
+# Office default theme color bases
+THEME_COLORS = {
+    "dk1":"#000000","lt1":"#FFFFFF","dk2":"#44546A","lt2":"#E7E6E6",
+    "accent1":"#4472C4","accent2":"#ED7D31","accent3":"#A9D18E",
+    "accent4":"#FFC000","accent5":"#5B9BD5","accent6":"#70AD47",
+    "hlink":"#0563C1","folHlink":"#954F72",
+}
+
+def extract_color(xml_block):
+    """Extract a hex color string from any DrawingML color block. Returns #RRGGBB or None."""
+    # 1. Explicit hex
+    m = re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', xml_block)
+    if m:
+        return "#" + m.group(1).upper()
+    # 2. Preset named color
+    m = re.search(r'<a:prstClr val="([^"]+)"', xml_block)
+    if m:
+        return PRESET_COLORS.get(m.group(1))
+    # 3. Theme color (resolve to approximate hex + apply lum/shade transforms)
+    m = re.search(r'<a:schemeClr val="([^"]+)"', xml_block)
+    if m:
+        base = THEME_COLORS.get(m.group(1))
+        if not base:
+            return None
+        r,g,b = int(base[1:3],16)/255, int(base[3:5],16)/255, int(base[5:7],16)/255
+        h,l,s = _colorsys.rgb_to_hls(r,g,b)
+        lmod = re.search(r'<a:lumMod val="(\d+)"', xml_block)
+        loff = re.search(r'<a:lumOff val="(\d+)"', xml_block)
+        smod = re.search(r'<a:shade val="(\d+)"', xml_block)
+        tint = re.search(r'<a:tint val="(\d+)"', xml_block)
+        if lmod: l = l * int(lmod.group(1))/100000
+        if loff: l = l + int(loff.group(1))/100000
+        if smod: l = l * int(smod.group(1))/100000
+        if tint:  l = l + (1-l)*int(tint.group(1))/100000
+        l = max(0.0, min(1.0, l))
+        r2,g2,b2 = _colorsys.hls_to_rgb(h,l,s)
+        return f"#{int(r2*255+.5):02X}{int(g2*255+.5):02X}{int(b2*255+.5):02X}"
+    return None
+
+def extract_fill_color(spPr_xml):
+    """Extract fill color from a spPr block — handles solid, gradient, noFill."""
+    colors = []
+    # solidFill
+    for sf in re.finditer(r'<a:solidFill>([\s\S]*?)</a:solidFill>', spPr_xml):
+        c = extract_color(sf.group(1))
+        if c: colors.append(c)
+    # gradientFill stops
+    for gs in re.finditer(r'<a:gs[^>]*>([\s\S]*?)</a:gs>', spPr_xml):
+        c = extract_color(gs.group(1))
+        if c: colors.append(c)
+    # line fill
+    for ln in re.finditer(r'<a:ln>([\s\S]*?)</a:ln>', spPr_xml):
+        for sf in re.finditer(r'<a:solidFill>([\s\S]*?)</a:solidFill>', ln.group(1)):
+            c = extract_color(sf.group(1))
+            if c: colors.append(c)
+    return colors
+
+
 def infer_role(size_pt, is_title_ph, cfg):
     if is_title_ph:
         return "slide_title", "explicit"
@@ -256,21 +326,11 @@ def check_slide(xml, slide_num, cfg):
         bullet_paras = [p for p in paras if "<a:buChar" in p or "<a:buAutoNum" in p]
         total_bullets += len(bullet_paras)
 
-        # Extract fill colors specifically from shape properties (spPr solidFill)
-        # This catches filled boxes, backgrounds, borders — not text run colors
+        # Extract fill colors from shape properties — handles srgbClr, schemeClr, prstClr
         spPr_match = re.search(r'<p:spPr>([\s\S]*?)</p:spPr>', sp)
         fill_colors = []
         if spPr_match:
-            spPr = spPr_match.group(1)
-            # solidFill inside spPr
-            for fc in re.finditer(r'<a:solidFill>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', spPr):
-                fill_colors.append("#" + fc.group(1).upper())
-            # gradient fill stops
-            for fc in re.finditer(r'<a:gs[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', spPr):
-                fill_colors.append("#" + fc.group(1).upper())
-            # line/outline fill
-            for fc in re.finditer(r'<a:ln>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', spPr):
-                fill_colors.append("#" + fc.group(1).upper())
+            fill_colors = extract_fill_color(spPr_match.group(1))
 
         # Track checked combos to avoid duplicate issues per shape
         checked_font_issues = set()
@@ -289,10 +349,8 @@ def check_slide(xml, slide_num, cfg):
             if sm:
                 size_pt = int(sm.group(1)) / 100
 
-            run_color = None
-            cm = re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', inner)
-            if cm:
-                run_color = "#" + cm.group(1).upper()
+            run_color = extract_color(inner)
+            if run_color:
                 all_colors_with_ctx.append((run_color, shape_text))
 
             if size_pt or font_name:
@@ -345,15 +403,19 @@ def check_slide(xml, slide_num, cfg):
         for fc in fill_colors:
             all_colors_with_ctx.append((fc, label))
 
-    # Background color
-    bg = re.search(r'<p:bg>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', xml)
-    if bg:
-        all_colors_with_ctx.append(("#" + bg.group(1).upper(), "slide background"))
+    # Background color (handles theme + explicit colors)
+    bg_match = re.search(r'<p:bg>([\s\S]*?)</p:bg>', xml)
+    if bg_match:
+        for sf in re.finditer(r'<a:solidFill>([\s\S]*?)</a:solidFill>', bg_match.group(1)):
+            c = extract_color(sf.group(1))
+            if c: all_colors_with_ctx.append((c, "slide background"))
 
     # Connector / line shapes (p:cxnSp) fill and line colors
     for cxn in re.finditer(r'<p:cxnSp>([\s\S]*?)</p:cxnSp>', xml):
-        for fc in re.finditer(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', cxn.group(1)):
-            all_colors_with_ctx.append(("#" + fc.group(1).upper(), "connector / line shape"))
+        spPr_m = re.search(r'<p:spPr>([\s\S]*?)</p:spPr>', cxn.group(1))
+        if spPr_m:
+            for c in extract_fill_color(spPr_m.group(1)):
+                all_colors_with_ctx.append((c, "connector / line shape"))
 
     # Picture fills (p:pic blipFill tint/effect colors)
     for pic in re.finditer(r'<p:pic>([\s\S]*?)</p:pic>', xml):
@@ -669,7 +731,7 @@ st.markdown("""
 <div style="display:flex;align-items:center;gap:18px;margin-bottom:6px">
   <div style="font-size:64px;line-height:1">🔍</div>
   <div>
-    <div style="font-size:28px;font-weight:700;color:#92400e;line-height:1.2">Loupe - A PowerPoint Brand Checker</div>
+    <div style="font-size:28px;font-weight:700;color:#92400e;line-height:1.2">PowerPoint Brand Checker</div>
     <div style="font-size:13px;color:#b45309;font-style:italic;margin-top:4px">Powered by JoAI</div>
   </div>
 </div>

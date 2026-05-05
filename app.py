@@ -241,7 +241,7 @@ def check_slide(xml, slide_num, cfg):
     all_colors_with_ctx = []   # list of (hex, snippet)
     has_content = False
     total_bullets = 0
-    shapes = re.findall(r"<p:sp[\s\S]*?</p:sp>", xml)
+    shapes = re.findall(r"<p:sp[ >][\s\S]*?</p:sp>", xml)
 
     for sp in shapes:
         is_title_ph = bool(re.search(r'ph type="title"|ph type="ctrTitle"', sp))

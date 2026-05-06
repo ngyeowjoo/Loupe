@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import datetime
 
 st.set_page_config(
-    page_title="Loupe",
+    page_title="Brand Checker",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -642,6 +642,286 @@ def build_html_report(results, filename, score, cfg):
 </body></html>"""
 
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCX PARSER & CHECKER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Word style ID → role key mapping
+WORD_STYLE_TO_ROLE = {
+    "title":    "slide_title",
+    "Title":    "slide_title",
+    "heading1": "slide_title",
+    "Heading1": "slide_title",
+    "heading2": "header",
+    "Heading2": "header",
+    "heading3": "subheader",
+    "Heading3": "subheader",
+    "heading4": "subheader",
+    "Heading4": "subheader",
+    "subtitle": "subheader",
+    "Subtitle": "subheader",
+}
+
+def extract_docx_theme_colors(zf):
+    """Read word/theme/theme1.xml and return a dict of theme slot -> hex."""
+    theme_map = dict(THEME_COLORS)  # start from Office defaults
+    try:
+        xml = zf.read("word/theme/theme1.xml").decode("utf-8")
+        # dk1
+        m = re.search(r'<a:dk1>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', xml)
+        if m: theme_map["dk1"] = "#" + m.group(1).upper()
+        # lt1
+        m = re.search(r'<a:lt1>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', xml)
+        if m: theme_map["lt1"] = "#" + m.group(1).upper()
+        # accent1-6
+        for i in range(1, 7):
+            m = re.search(rf'<a:accent{i}>[\s\S]*?<a:srgbClr val="([0-9A-Fa-f]{6})"', xml)
+            if m: theme_map[f"accent{i}"] = "#" + m.group(1).upper()
+    except Exception:
+        pass
+    return theme_map
+
+
+def extract_word_color(rpr_xml, theme_map):
+    """Extract color from a <w:rPr> block. Returns hex or None."""
+    # Explicit w:color val (6-char hex, no #)
+    m = re.search(r'<w:color w:val="([0-9A-Fa-f]{6})"', rpr_xml)
+    if m and m.group(1).upper() not in ("000000", "AUTO"):
+        return "#" + m.group(1).upper()
+    # Theme color via w:color w:themeColor
+    m = re.search(r'<w:color[^>]*w:themeColor="([^"]+)"', rpr_xml)
+    if m:
+        slot = m.group(1)  # e.g. "accent2", "dark1"
+        # Normalise Word theme slot names → our THEME_COLORS keys
+        slot_map = {"dark1":"dk1","dark2":"dk2","light1":"lt1","light2":"lt2"}
+        key = slot_map.get(slot, slot)
+        base = theme_map.get(key)
+        if base:
+            # Apply lumMod/lumOff if present (same logic as PPTX)
+            lmod = re.search(r'w:themeTint="([0-9A-Fa-f]{2})"', rpr_xml)
+            lshd = re.search(r'w:themeShade="([0-9A-Fa-f]{2})"', rpr_xml)
+            if lmod or lshd:
+                r2,g2,b2 = hex_to_rgb(base)
+                h,l,s = _colorsys.rgb_to_hls(r2/255, g2/255, b2/255)
+                if lmod: l = l * (int(lmod.group(1), 16)/255)
+                if lshd: l = l * (int(lshd.group(1), 16)/255)
+                l = max(0.0, min(1.0, l))
+                rr,gg,bb = _colorsys.hls_to_rgb(h,l,s)
+                return f"#{int(rr*255+.5):02X}{int(gg*255+.5):02X}{int(bb*255+.5):02X}"
+            return base
+    return None
+
+
+def parse_docx(file_bytes):
+    """Return list of paragraph dicts from a .docx file."""
+    zf = zipfile.ZipFile(io.BytesIO(file_bytes))
+    xml = zf.read("word/document.xml").decode("utf-8")
+    theme_map = extract_docx_theme_colors(zf)
+
+    paragraphs = []
+    for para_m in re.finditer(r'<w:p[ >]([\s\S]*?)</w:p>', xml):
+        para_xml = para_m.group(0)
+
+        # Named style
+        style_m = re.search(r'<w:pStyle w:val="([^"]+)"', para_xml)
+        style_id = style_m.group(1) if style_m else "Normal"
+
+        # Role from named style (explicit) or fallback to None (heuristic later)
+        role = WORD_STYLE_TO_ROLE.get(style_id)
+        method = "explicit" if role else "heuristic"
+
+        # Collect runs
+        runs = []
+        for run_m in re.finditer(r'<w:r[ >]([\s\S]*?)</w:r>', para_xml):
+            run_xml = run_m.group(0)
+            rpr_m = re.search(r'<w:rPr>([\s\S]*?)</w:rPr>', run_xml)
+            rpr_xml = rpr_m.group(0) if rpr_m else ""
+
+            # Font
+            font_m = re.search(r'<w:rFonts[^>]*w:ascii="([^"]+)"', rpr_xml)
+            font = font_m.group(1) if font_m else None
+
+            # Size (half-points → pt)
+            sz_m = re.search(r'<w:sz w:val="(\d+)"', rpr_xml)
+            size_pt = int(sz_m.group(1)) / 2 if sz_m else None
+
+            # Color
+            color = extract_word_color(rpr_xml, theme_map)
+
+            # Text
+            texts = re.findall(r'<w:t[^>]*>([^<]*)</w:t>', run_xml)
+            text = "".join(texts).strip()
+
+            if text or font or size_pt or color:
+                runs.append({"font": font, "size": size_pt, "color": color, "text": text})
+
+        # Para-level text
+        para_text = trunc(" ".join(
+            r["text"] for r in runs if r["text"]
+        ))
+
+        paragraphs.append({
+            "style_id": style_id,
+            "role":     role,
+            "method":   method,
+            "runs":     runs,
+            "text":     para_text,
+        })
+
+    return paragraphs, theme_map
+
+
+def check_docx(paragraphs, cfg):
+    """Run brand checks on parsed DOCX paragraphs. Returns list of result dicts."""
+    results = []
+    para_num = 0
+    all_issues = []
+
+    for para in paragraphs:
+        if not para["runs"] and not para["text"]:
+            continue
+        para_num += 1
+
+        issues = []
+        checked_font = set()
+        checked_size = set()
+
+        for run in para["runs"]:
+            # Infer role if not explicit
+            role = para["role"]
+            method = para["method"]
+            if not role:
+                role, method = infer_role(run["size"] or 0, False, cfg)
+            role = role or "body"
+
+            spec     = cfg["role_specs"].get(role, {})
+            exp_size = spec.get("size")
+            snippet  = para["text"] or "—"
+
+            # Font check
+            if cfg["chk_fonts"] and run["font"]:
+                fn_lower = run["font"].lower()
+                font_ok = any(fn_lower == af or fn_lower.startswith(af) for af in ACCEPTED_FONTS)
+                if not font_ok:
+                    key = (role, run["font"])
+                    if key not in checked_font:
+                        checked_font.add(key)
+                        issues.append({
+                            "type":    "error",
+                            "message": f"{ROLE_LABELS.get(role, role)}: wrong font",
+                            "detail":  f"Found '{run['font']}' — accepted: {', '.join(sorted(ACCEPTED_FONTS))}",
+                            "snippet": snippet,
+                            "colors":  [],
+                        })
+
+            # Size check
+            if cfg["chk_sizes"] and run["size"] and exp_size:
+                diff = abs(run["size"] - exp_size)
+                if diff > cfg.get("size_tolerance", 2):
+                    key = (role, run["size"])
+                    if key not in checked_size:
+                        checked_size.add(key)
+                        sev = "error" if diff > 4 else "warning"
+                        issues.append({
+                            "type":    sev,
+                            "message": f"{ROLE_LABELS.get(role, role)}: wrong font size",
+                            "detail":  f"Found {run['size']}pt, expected {exp_size}pt",
+                            "snippet": snippet,
+                            "colors":  [],
+                        })
+
+            # Color check
+            if cfg["chk_colors"] and run["color"] and cfg["brand_colors"]:
+                if not is_brand_color(run["color"], cfg["brand_colors"], cfg["tolerance"]):
+                    issues.append({
+                        "type":    "warning",
+                        "message": "Off-brand text color",
+                        "detail":  f"Color {run['color']} not in brand palette",
+                        "snippet": snippet,
+                        "colors":  [run["color"]],
+                    })
+
+        results.append({
+            "num":    para_num,
+            "style":  para["style_id"],
+            "role":   para["role"] or "body",
+            "method": para["method"],
+            "text":   para["text"],
+            "issues": issues,
+            "role_findings": [
+                {"role": para["role"] or "body", "method": para["method"],
+                 "font": r["font"], "size": r["size"], "snippet": para["text"]}
+                for r in para["runs"] if r["font"] or r["size"]
+            ],
+        })
+
+    return results
+
+
+def build_docx_html_report(results, filename, score, cfg):
+    """HTML report for DOCX checks."""
+    score_color = "#065f46" if score >= 80 else "#92400e" if score >= 60 else "#9b1c1c"
+    total  = len(results)
+    errs   = sum(1 for r in results for i in r["issues"] if i["type"]=="error")
+    warns  = sum(1 for r in results for i in r["issues"] if i["type"]=="warning")
+
+    swatches = "".join(
+        f"<span style='display:inline-flex;align-items:center;gap:5px;"
+        f"background:#fff;border:1px solid #fde68a;border-radius:20px;"
+        f"padding:3px 9px;font-size:12px;margin:3px'>"
+        f"<span style='width:12px;height:12px;border-radius:50%;"
+        f"background:{h};border:1px solid #ccc;flex-shrink:0'></span>"
+        f"{ORANGE_PALETTE.get(h,h)}</span>"
+        for h in cfg["brand_colors"]
+    )
+
+    rows = ""
+    for r in results:
+        label = r["text"][:60] + "…" if len(r["text"]) > 60 else r["text"]
+        rows += f"<tr><td style='font-weight:600'>{r['num']}</td><td>{r['style']}</td><td>{label or '—'}</td>"
+        if r["issues"]:
+            rows += "<td>" + "<br>".join(
+                f"<span style='color:{'#9b1c1c' if i['type']=='error' else '#92400e'}'>"
+                f"{'✖' if i['type']=='error' else '⚠'} {i['message']}: {i['detail']}</span>"
+                for i in r["issues"]
+            ) + "</td></tr>"
+        else:
+            rows += "<td><span style='color:#065f46'>✔ Pass</span></td></tr>"
+
+    return f"""<!DOCTYPE html><html><head><meta charset='utf-8'>
+<title>Brand Report — {filename}</title>
+<style>
+  body{{font-family:Arial,sans-serif;max-width:1000px;margin:40px auto;
+        padding:0 20px;background:#fffbeb;color:#111}}
+  h1{{font-size:22px;color:#92400e}}
+  h2{{font-size:14px;color:#777;margin-bottom:20px}}
+  .score{{font-size:48px;font-weight:700;color:{score_color}}}
+  .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:20px 0}}
+  .metric{{background:#fef3c7;border-radius:10px;padding:14px;text-align:center}}
+  .metric-val{{font-size:28px;font-weight:700}}
+  .metric-lbl{{font-size:12px;color:#777;margin-top:4px}}
+  table{{width:100%;border-collapse:collapse;margin-top:24px}}
+  th{{background:#fef3c7;padding:8px 12px;text-align:left;
+      border-bottom:2px solid #fde68a;color:#92400e;font-size:13px}}
+  td{{padding:8px 12px;border-top:1px solid #fef3c7;font-size:13px;vertical-align:top}}
+</style></head><body>
+<h1>📊 Brand Compliance Report — Word Document</h1>
+<h2>{filename} · {datetime.now().strftime('%Y-%m-%d %H:%M')}</h2>
+<div class='score'>{score}%</div>
+<p style='color:#777;margin-top:4px'>compliance score</p>
+<div class='grid'>
+  <div class='metric'><div class='metric-val'>{total}</div><div class='metric-lbl'>paragraphs</div></div>
+  <div class='metric'><div class='metric-val' style='color:#9b1c1c'>{errs}</div><div class='metric-lbl'>errors</div></div>
+  <div class='metric'><div class='metric-val' style='color:#92400e'>{warns}</div><div class='metric-lbl'>warnings</div></div>
+</div>
+<div style='margin:16px 0'><strong style='color:#92400e'>Brand palette:</strong><br>{swatches}</div>
+<table><thead><tr>
+  <th>#</th><th>Style</th><th>Text</th><th>Issues</th>
+</tr></thead><tbody>{rows}</tbody></table>
+</body></html>"""
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -731,15 +1011,14 @@ st.markdown("""
 <div style="display:flex;align-items:center;gap:18px;margin-bottom:6px">
   <div style="font-size:64px;line-height:1">🔍</div>
   <div>
-    <div style="font-size:28px;font-weight:700;color:#92400e;line-height:1.2">Loupe - A PowerPoint Brand Checker</div>
+    <div style="font-size:28px;font-weight:700;color:#92400e;line-height:1.2">Brand Compliance Checker</div>
     <div style="font-size:13px;color:#b45309;font-style:italic;margin-top:4px">Powered by JoAI</div>
-    <div style="font-size:13px;color:#b45309;font-style:italic;margin-top:4px">AI may make mistakes, verify any important details independently</div>
   </div>
 </div>
-<p style="color:#6b7280;font-size:14px;margin-top:0">Upload a .pptx — verify fonts, colors, text roles, and layout against your brand guidelines.</p>
+<p style="color:#6b7280;font-size:14px;margin-top:0">Upload a <strong>.pptx</strong> or <strong>.docx</strong> — verify fonts, colors, text roles, and layout against your brand guidelines.</p>
 """, unsafe_allow_html=True)
 
-uploaded = st.file_uploader("Drop your .pptx file here", type=["pptx"])
+uploaded = st.file_uploader("Drop your .pptx or .docx file here", type=["pptx", "docx"])
 
 if uploaded:
     cfg = dict(
@@ -755,96 +1034,171 @@ if uploaded:
     )
 
     file_bytes = uploaded.read()
-    slides_xml, pres_w, pres_h = parse_pptx(file_bytes)
-    results = run_checks(slides_xml, pres_w, pres_h, cfg)
+    is_docx = uploaded.name.lower().endswith(".docx")
 
-    total    = len(results)
-    errors   = sum(1 for r in results for i in r["issues"] if i["type"]=="error")
-    warnings = sum(1 for r in results for i in r["issues"] if i["type"]=="warning")
-    clean    = sum(1 for r in results if not r["issues"])
-    score    = round(clean/total*100)
+    if is_docx:
+        # ── DOCX path ──────────────────────────────────────────────────────
+        paragraphs, theme_map = parse_docx(file_bytes)
+        results = check_docx(paragraphs, cfg)
 
-    m1,m2,m3,m4 = st.columns(4)
-    m1.metric("Compliance score", f"{score}%")
-    m2.metric("Slides", total)
-    m3.metric("Errors", errors)
-    m4.metric("Warnings", warnings)
+        total    = len(results)
+        errors   = sum(1 for r in results for i in r["issues"] if i["type"]=="error")
+        warnings = sum(1 for r in results for i in r["issues"] if i["type"]=="warning")
+        clean    = sum(1 for r in results if not r["issues"])
+        score    = round(clean/total*100) if total else 100
 
-    st.divider()
+        m1,m2,m3,m4 = st.columns(4)
+        m1.metric("Compliance score", f"{score}%")
+        m2.metric("Paragraphs", total)
+        m3.metric("Errors", errors)
+        m4.metric("Warnings", warnings)
 
-    tab1, tab2 = st.tabs(["📋 Slide issues", "🔤 Role detection map"])
-
-    # ── Tab 1: Issues with snippets ──────────────────────────────────────────
-    with tab1:
-        for r in results:
-            errs  = [i for i in r["issues"] if i["type"]=="error"]
-            warns = [i for i in r["issues"] if i["type"]=="warning"]
-
-            if not r["issues"]:
-                with st.expander(f"✅ Slide {r['num']} — Pass"):
-                    st.success("No issues found.")
-            else:
-                icon = "🔴" if errs else "🟡"
-                label = f"{icon} Slide {r['num']} — {len(errs)} error(s), {len(warns)} warning(s)"
-                with st.expander(label):
-                    cards_html = "".join(render_issue_card(i) for i in r["issues"])
-                    st.markdown(cards_html, unsafe_allow_html=True)
-
-    # ── Tab 2: Role detection map ────────────────────────────────────────────
-    with tab2:
-        if smart_roles:
-            st.info("⚠️ **Smart role detection on** — Header/Subheader/Body inferred by font size. "
-                    "Rows marked *heuristic* may not always be accurate.")
-        else:
-            st.info("Smart role detection **off** — only explicit title placeholders are tagged.")
+        st.divider()
+        st.caption("📄 Word document — paragraphs checked against brand guidelines")
 
         badge_html = {
-            "slide_title": '<span class="badge badge-title">Slide Title</span>',
-            "header":      '<span class="badge badge-header">Header</span>',
-            "subheader":   '<span class="badge badge-subheader">Subheader</span>',
+            "slide_title": '<span class="badge badge-title">Title</span>',
+            "header":      '<span class="badge badge-header">Heading</span>',
+            "subheader":   '<span class="badge badge-subheader">Subheading</span>',
             "body":        '<span class="badge badge-body">Body</span>',
         }
 
-        for r in results:
-            with st.expander(f"Slide {r['num']}"):
-                if not r["role_findings"]:
-                    st.caption("No text runs detected.")
-                    continue
-                seen, rows_html = set(), ""
-                for rf in r["role_findings"]:
-                    key = (rf["role"], rf["font"], rf["size"])
-                    if key in seen: continue
-                    seen.add(key)
-                    badge   = badge_html.get(rf["role"], "")
-                    method  = "✓ explicit" if rf["method"]=="explicit" else "~ heuristic"
-                    font_d  = rf["font"] or "—"
-                    size_d  = f"{rf['size']}pt" if rf["size"] else "—"
-                    snip_d  = rf.get("snippet","") or "—"
-                    esc_snip = snip_d.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-                    rows_html += (
-                        f"<tr>"
-                        f"<td>{badge}</td>"
-                        f"<td>{font_d}</td>"
-                        f"<td>{size_d}</td>"
-                        f"<td style='max-width:200px;overflow:hidden;text-overflow:ellipsis;"
-                        f"white-space:nowrap;color:#6b7280;font-size:11px'>{esc_snip}</td>"
-                        f"<td style='color:#9ca3af;font-size:11px'>{method}</td>"
-                        f"</tr>"
-                    )
-                st.markdown(
-                    f"<table class='role-table'><thead><tr>"
-                    f"<th>Role</th><th>Font</th><th>Size</th><th>Text snippet</th><th>Method</th>"
-                    f"</tr></thead><tbody>{rows_html}</tbody></table>",
-                    unsafe_allow_html=True
-                )
+        tab1, tab2 = st.tabs(["📋 Paragraph issues", "🔤 Role detection map"])
 
-    st.divider()
-    html = build_html_report(results, uploaded.name, score, cfg)
-    st.download_button("⬇️ Download HTML report", data=html.encode(),
-                       file_name="brand-report.html", mime="text/html")
+        with tab1:
+            for r in results:
+                errs  = [i for i in r["issues"] if i["type"]=="error"]
+                warns = [i for i in r["issues"] if i["type"]=="warning"]
+                label_text = r["text"][:50] + "…" if len(r["text"]) > 50 else r["text"]
+                para_label = f"§{r['num']}  [{r['style']}]  {label_text or '(empty)'}"
+                if not r["issues"]:
+                    with st.expander(f"✅ {para_label}"):
+                        st.success("No issues found.")
+                else:
+                    icon = "🔴" if errs else "🟡"
+                    with st.expander(f"{icon} {para_label} — {len(errs)} error(s), {len(warns)} warning(s)"):
+                        cards_html = "".join(render_issue_card(i) for i in r["issues"])
+                        st.markdown(cards_html, unsafe_allow_html=True)
+
+        with tab2:
+            st.info("📄 **Word document** — roles mapped from paragraph styles (Heading1 → Header, etc.). "
+                    "Rows without an explicit style use size-based heuristic.")
+            for r in results:
+                if not r["role_findings"]: continue
+                with st.expander(f"§{r['num']} [{r['style']}] {r['text'][:40] or '(empty)'}"):
+                    seen, rows_html = set(), ""
+                    for rf in r["role_findings"]:
+                        key = (rf["role"], rf["font"], rf["size"])
+                        if key in seen: continue
+                        seen.add(key)
+                        badge  = badge_html.get(rf["role"], "")
+                        method = "✓ style" if rf["method"]=="explicit" else "~ heuristic"
+                        font_d = rf["font"] or "—"
+                        size_d = f"{rf['size']}pt" if rf["size"] else "—"
+                        snip_d = (rf.get("snippet","") or "—").replace("&","&amp;").replace("<","&lt;")
+                        rows_html += (
+                            f"<tr><td>{badge}</td><td>{font_d}</td><td>{size_d}</td>"
+                            f"<td style='max-width:200px;overflow:hidden;text-overflow:ellipsis;"
+                            f"white-space:nowrap;color:#6b7280;font-size:11px'>{snip_d}</td>"
+                            f"<td style='color:#9ca3af;font-size:11px'>{method}</td></tr>"
+                        )
+                    st.markdown(
+                        f"<table class='role-table'><thead><tr>"
+                        f"<th>Role</th><th>Font</th><th>Size</th><th>Text</th><th>Method</th>"
+                        f"</tr></thead><tbody>{rows_html}</tbody></table>",
+                        unsafe_allow_html=True
+                    )
+
+        st.divider()
+        html = build_docx_html_report(results, uploaded.name, score, cfg)
+        st.download_button("⬇️ Download HTML report", data=html.encode(),
+                           file_name="brand-report-docx.html", mime="text/html")
+
+    else:
+        # ── PPTX path ──────────────────────────────────────────────────────
+        slides_xml, pres_w, pres_h = parse_pptx(file_bytes)
+        results = run_checks(slides_xml, pres_w, pres_h, cfg)
+
+        total    = len(results)
+        errors   = sum(1 for r in results for i in r["issues"] if i["type"]=="error")
+        warnings = sum(1 for r in results for i in r["issues"] if i["type"]=="warning")
+        clean    = sum(1 for r in results if not r["issues"])
+        score    = round(clean/total*100)
+
+        m1,m2,m3,m4 = st.columns(4)
+        m1.metric("Compliance score", f"{score}%")
+        m2.metric("Slides", total)
+        m3.metric("Errors", errors)
+        m4.metric("Warnings", warnings)
+
+        st.divider()
+
+        tab1, tab2 = st.tabs(["📋 Slide issues", "🔤 Role detection map"])
+
+        with tab1:
+            for r in results:
+                errs  = [i for i in r["issues"] if i["type"]=="error"]
+                warns = [i for i in r["issues"] if i["type"]=="warning"]
+                if not r["issues"]:
+                    with st.expander(f"✅ Slide {r['num']} — Pass"):
+                        st.success("No issues found.")
+                else:
+                    icon = "🔴" if errs else "🟡"
+                    label = f"{icon} Slide {r['num']} — {len(errs)} error(s), {len(warns)} warning(s)"
+                    with st.expander(label):
+                        cards_html = "".join(render_issue_card(i) for i in r["issues"])
+                        st.markdown(cards_html, unsafe_allow_html=True)
+
+        with tab2:
+            if smart_roles:
+                st.info("⚠️ **Smart role detection on** — Header/Subheader/Body inferred by font size. "
+                        "Rows marked *heuristic* may not always be accurate.")
+            else:
+                st.info("Smart role detection **off** — only explicit title placeholders are tagged.")
+
+            badge_html = {
+                "slide_title": '<span class="badge badge-title">Slide Title</span>',
+                "header":      '<span class="badge badge-header">Header</span>',
+                "subheader":   '<span class="badge badge-subheader">Subheader</span>',
+                "body":        '<span class="badge badge-body">Body</span>',
+            }
+
+            for r in results:
+                with st.expander(f"Slide {r['num']}"):
+                    if not r["role_findings"]:
+                        st.caption("No text runs detected.")
+                        continue
+                    seen, rows_html = set(), ""
+                    for rf in r["role_findings"]:
+                        key = (rf["role"], rf["font"], rf["size"])
+                        if key in seen: continue
+                        seen.add(key)
+                        badge   = badge_html.get(rf["role"], "")
+                        method  = "✓ explicit" if rf["method"]=="explicit" else "~ heuristic"
+                        font_d  = rf["font"] or "—"
+                        size_d  = f"{rf['size']}pt" if rf["size"] else "—"
+                        snip_d  = rf.get("snippet","") or "—"
+                        esc_snip = snip_d.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+                        rows_html += (
+                            f"<tr><td>{badge}</td><td>{font_d}</td><td>{size_d}</td>"
+                            f"<td style='max-width:200px;overflow:hidden;text-overflow:ellipsis;"
+                            f"white-space:nowrap;color:#6b7280;font-size:11px'>{esc_snip}</td>"
+                            f"<td style='color:#9ca3af;font-size:11px'>{method}</td></tr>"
+                        )
+                    st.markdown(
+                        f"<table class='role-table'><thead><tr>"
+                        f"<th>Role</th><th>Font</th><th>Size</th><th>Text snippet</th><th>Method</th>"
+                        f"</tr></thead><tbody>{rows_html}</tbody></table>",
+                        unsafe_allow_html=True
+                    )
+
+        st.divider()
+        html = build_html_report(results, uploaded.name, score, cfg)
+        st.download_button("⬇️ Download HTML report", data=html.encode(),
+                           file_name="brand-report.html", mime="text/html")
 
 else:
-    st.info("👈 Set your brand guidelines in the sidebar, then upload a .pptx file.")
+    st.info("👈 Set your brand guidelines in the sidebar, then upload a .pptx or .docx file.")
 
     st.markdown("#### Default brand palette — Office Orange Accent 1")
     st.markdown(
@@ -868,3 +1222,5 @@ else:
         f"</tr></thead><tbody>{rows}</tbody></table>",
         unsafe_allow_html=True
     )
+
+# placeholder - will be replaced
